@@ -48,8 +48,7 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 4242));
 
-    let make_svc = make_service_fn(|socket: &hyper::server::conn::AddrStream| {
-        let remote_addr = socket.remote_addr();
+    let make_svc = make_service_fn(|_: &hyper::server::conn::AddrStream| {
         let field_data = field_data.clone();
         async move {
             let field_data = field_data.clone();
@@ -59,16 +58,19 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
                     let opt_data = field_data.lock().unwrap();
 
                     if let Some(data) = *opt_data {
-                        info!("Temperature {}°C", data.temperature_celsius());
-                        info!("Pressure {}hPa", data.pressure_hpa());
-                        info!("Humidity {}%", data.humidity_percent());
-                        info!("Gas Resistence {}Ω", data.gas_resistance_ohm());
+                        Ok::<_, Infallible>(Response::new(Body::from(format!(
+"Temperature    {}°C
+Pressure       {}hPa
+Humidity       {}%
+Gas Resistence {}Ω",
+                            data.temperature_celsius(),
+                            data.pressure_hpa(),
+                            data.humidity_percent(),
+                            data.gas_resistance_ohm(),
+                        ))))
                     } else {
-                        warn!("No data");
+                        Ok::<_, Infallible>(Response::new(Body::from("No data yet")))
                     }
-                    Ok::<_, Infallible>(
-                        Response::new(Body::from(format!("Hello, {}!", remote_addr)))
-                    )
                 }
             }))
         }
@@ -83,10 +85,9 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
             info!("Retrieving sensor data");
             dev.set_sensor_mode(PowerMode::ForcedMode).unwrap();
             let (data, _state) = dev.get_sensor_data().unwrap();
-            info!("Sensor Data {:?}", data);
-            info!("Temperature {}°C", data.temperature_celsius());
-            info!("Pressure {}hPa", data.pressure_hpa());
-            info!("Humidity {}%", data.humidity_percent());
+            info!("Temperature {}°C",   data.temperature_celsius());
+            info!("Pressure {}hPa",     data.pressure_hpa());
+            info!("Humidity {}%",       data.humidity_percent());
             info!("Gas Resistence {}Ω", data.gas_resistance_ohm());
 
             let mut opt_data = field_data.lock().unwrap();

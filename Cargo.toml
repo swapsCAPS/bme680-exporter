@@ -1,0 +1,11 @@
+[package]
+name = "rust-bme680-prometheus"
+version = "0.1.0"
+authors = ["swapsCAPS <verstegen.daan@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+prometheus = "0.7"
+bme680 = "0.5.0"
+embedded-hal = "0.2.3"
+linux-embedded-hal = "0.3.0"

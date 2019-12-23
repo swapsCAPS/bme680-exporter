@@ -1,5 +1,5 @@
 [package]
-name = "rust-bme680-prometheus"
+name = "bme680-exporter"
 version = "0.1.0"
 authors = ["swapsCAPS <verstegen.daan@gmail.com>"]
 edition = "2018"

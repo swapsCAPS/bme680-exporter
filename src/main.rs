@@ -1,10 +1,8 @@
 use log::*;
 use linux_embedded_hal as hal;
 use bme680::{Bme680, I2CAddress, PowerMode, SettingsBuilder, OversamplingSetting, IIRFilterSize};
-use core::result;
 use core::time::Duration;
 use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::blocking::i2c;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::{thread};
@@ -24,13 +22,16 @@ lazy_static! {
     static ref GAS_GAUGE: Gauge = register_gauge!("bme680_gas", "resistance Ω").unwrap();
 }
 
+const PORT: u16 = 4242;
+
 #[tokio::main]
-async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::Error, <hal::I2cdev as i2c::Write>::Error>> {
+async fn main() {
+    info!("Initializing");
     env_logger::init();
 
-    let i2c = hal::I2cdev::new("/dev/i2c-1").unwrap();
+    let i2c = hal::I2cdev::new("/dev/i2c-1").expect("Error in I2cdev::new()");
 
-    let mut dev = Bme680::init(i2c, hal::Delay {}, I2CAddress::Primary)?;
+    let mut dev = Bme680::init(i2c, hal::Delay {}, I2CAddress::Primary).expect("could not init bme680 device");
     let mut delay = hal::Delay {};
 
     let settings = SettingsBuilder::new()
@@ -42,13 +43,11 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
         .with_run_gas(true)
         .build();
 
-    dev.set_sensor_settings(settings)?;
-    dev.set_sensor_mode(PowerMode::ForcedMode)?;
+    dev.set_sensor_settings(settings).expect("Could not set sensor settings");
+    dev.set_sensor_mode(PowerMode::ForcedMode).expect("Could not set sensor mode");
 
     let sensor_settings = dev.get_sensor_settings(settings.1);
     info!("Sensor settings: {:?}", sensor_settings);
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], 4242));
 
     async fn prom(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
         let encoder = TextEncoder::new();
@@ -69,8 +68,7 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
         Ok::<_, Infallible>(service_fn(prom))
     });
 
-    let server = Server::bind(&addr).serve(make_svc);
-
+    info!("Starting poll loop");
     thread::spawn(move || {
         loop {
             delay.delay_ms(5000u32);
@@ -89,10 +87,11 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
         }
     });
 
-    // Run this server for... forever!
+    info!("Starting server on port {}", PORT);
+    let addr = SocketAddr::from(([0, 0, 0, 0], PORT));
+    let server = Server::bind(&addr).serve(make_svc);
+
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
     }
-
-    Ok(())
 }

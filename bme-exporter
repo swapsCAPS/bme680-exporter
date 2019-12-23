@@ -1,0 +1,11 @@
+#!/bin/bash
+docker stop bme-exporter
+docker rm -f bme-exporter
+docker run -d \
+  --net host \
+  --name bme-exporter \
+  --restart always \
+  -v /dev/i2c-1:/dev/i2c-1 \
+  -e RUST_LOG=info \
+  --privileged \
+  bme-exporter:0.1.0

@@ -1,12 +1,6 @@
-extern crate bme680;
-extern crate embedded_hal;
-extern crate env_logger;
-extern crate linux_embedded_hal as hal;
-#[macro_use]
-extern crate log;
-
-// use crate::hal::*;
-use bme680::{Bme680, I2CAddress, FieldData, PowerMode, SettingsBuilder, OversamplingSetting, IIRFilterSize};
+use log::*;
+use linux_embedded_hal as hal;
+use bme680::{Bme680, I2CAddress, PowerMode, SettingsBuilder, OversamplingSetting, IIRFilterSize};
 use core::result;
 use core::time::Duration;
 use embedded_hal::blocking::delay::DelayMs;
@@ -14,9 +8,21 @@ use embedded_hal::blocking::i2c;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::{thread};
-use hyper::{Body, Request, Response, Server};
+use hyper::{header::CONTENT_TYPE, Body, Request, Response, Server};
 use hyper::service::{make_service_fn, service_fn};
-use std::sync::{Arc, Mutex};
+use lazy_static::lazy_static;
+use prometheus::{Encoder, Gauge, TextEncoder};
+
+// Y?!
+#[macro_use]
+extern crate prometheus;
+
+lazy_static! {
+    static ref TMP_GAUGE: Gauge = register_gauge!("bme680_temp", "degrees celsius").unwrap();
+    static ref PRS_GAUGE: Gauge = register_gauge!("bme680_pressure", "hPa").unwrap();
+    static ref HUM_GAUGE: Gauge = register_gauge!("bme680_humidity", "precentage").unwrap();
+    static ref GAS_GAUGE: Gauge = register_gauge!("bme680_gas", "resistance Ω").unwrap();
+}
 
 #[tokio::main]
 async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::Error, <hal::I2cdev as i2c::Write>::Error>> {
@@ -26,10 +32,6 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
 
     let mut dev = Bme680::init(i2c, hal::Delay {}, I2CAddress::Primary)?;
     let mut delay = hal::Delay {};
-
-    let field_data = Arc::new(Mutex::new(None::<FieldData>));
-
-    // let state = State { field_data: Arc::clone(&field_data) };
 
     let settings = SettingsBuilder::new()
         .with_humidity_oversampling(OversamplingSetting::OS2x)
@@ -46,39 +48,29 @@ async fn main() -> result::Result<(), bme680::Error<<hal::I2cdev as i2c::Read>::
     let sensor_settings = dev.get_sensor_settings(settings.1);
     info!("Sensor settings: {:?}", sensor_settings);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 4242));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 4242));
 
-    let make_svc = make_service_fn(|_: &hyper::server::conn::AddrStream| {
-        let field_data = field_data.clone();
-        async move {
-            let field_data = field_data.clone();
-            Ok::<_, Infallible>(service_fn(move |_: Request<Body>| {
-                let field_data = field_data.clone();
-                async move {
-                    let opt_data = field_data.lock().unwrap();
+    async fn prom(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        let encoder = TextEncoder::new();
+        let mut buffer = vec![];
+        let metric_families = prometheus::gather();
+        encoder.encode(&metric_families, &mut buffer).unwrap();
 
-                    if let Some(data) = *opt_data {
-                        Ok::<_, Infallible>(Response::new(Body::from(format!(
-"Temperature    {}°C
-Pressure       {}hPa
-Humidity       {}%
-Gas Resistence {}Ω",
-                            data.temperature_celsius(),
-                            data.pressure_hpa(),
-                            data.humidity_percent(),
-                            data.gas_resistance_ohm(),
-                        ))))
-                    } else {
-                        Ok::<_, Infallible>(Response::new(Body::from("No data yet")))
-                    }
-                }
-            }))
-        }
+        let response = Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, encoder.format_type())
+            .body(Body::from(buffer))
+            .unwrap();
+
+        Ok(response)
+    }
+
+    let make_svc = make_service_fn(|_conn| async {
+        Ok::<_, Infallible>(service_fn(prom))
     });
 
     let server = Server::bind(&addr).serve(make_svc);
 
-    let field_data = field_data.clone();
     thread::spawn(move || {
         loop {
             delay.delay_ms(5000u32);
@@ -90,9 +82,10 @@ Gas Resistence {}Ω",
             info!("Humidity {}%",       data.humidity_percent());
             info!("Gas Resistence {}Ω", data.gas_resistance_ohm());
 
-            let mut opt_data = field_data.lock().unwrap();
-
-            *opt_data = Some(data)
+            TMP_GAUGE.set(data.temperature_celsius() as f64);
+            PRS_GAUGE.set(data.pressure_hpa() as f64);
+            HUM_GAUGE.set(data.humidity_percent() as f64);
+            GAS_GAUGE.set(data.gas_resistance_ohm() as f64);
         }
     });
 

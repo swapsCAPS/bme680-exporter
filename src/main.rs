@@ -73,8 +73,20 @@ async fn main() {
         loop {
             delay.delay_ms(5000u32);
             info!("Retrieving sensor data");
-            dev.set_sensor_mode(PowerMode::ForcedMode).unwrap();
-            let (data, _state) = dev.get_sensor_data().unwrap();
+
+            if let Err(_) = dev.set_sensor_mode(PowerMode::ForcedMode) {
+                error!("Could not set sensor mode");
+                continue;
+            }
+
+            let data = match dev.get_sensor_data() {
+                Ok(sensor_data) => sensor_data.0,
+                Err(_) => {
+                    error!("Could not get sensor data");
+                    continue;
+                }
+            };
+
             info!("Temperature {}°C",   data.temperature_celsius());
             info!("Pressure {}hPa",     data.pressure_hpa());
             info!("Humidity {}%",       data.humidity_percent());

@@ -6,4 +6,4 @@ Cobbled together a prometheus metrics exporter for a bme680...
 - https://github.com/marcelbuesing/bme680  
 - https://github.com/hyperium/hyper  
 
-Built and tested on RaspberryPi 2
+Built and tested on RaspberryPi 3
